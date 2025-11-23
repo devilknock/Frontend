@@ -43,9 +43,8 @@ function extractTs(obj) {
 }
 
 export default function App() {
-  const API_BASE = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "https://aka-g2l0.onrender.com";
-  const WS_URL = (typeof window !== "undefined" && window.location && window.location.origin) ? (window.location.origin.replace(/^http/, "ws")) : "wss://aka-g2l0.onrender.com";
-
+  const API_BASE = "https://aka-g2l0.onrender.com";
+const WS_URL = "wss://aka-g2l0.onrender.com";
   const [status, setStatus] = useState("connecting");
   const [signal, setSignal] = useState(null);
   const [prices, setPrices] = useState([]); // { t: ms, close: number, symbol }
