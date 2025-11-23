@@ -5,70 +5,68 @@ function toNumber(v) {
   const n = Number(v);
   return Number.isNaN(n) ? undefined : n;
 }
-
 function normalizeTs(rawTs) {
   if (rawTs === undefined || rawTs === null) return undefined;
   let n = toNumber(rawTs);
-  // sometimes ts comes as string like "168..." or number in seconds (e.g. 1690000000)
   if (n === undefined) return undefined;
-  // if looks like seconds (less than ~1e12), treat as seconds and convert to ms
   if (n < 1e12) n = n * 1000;
   return n;
 }
-
 function extractClose(obj) {
   if (obj === undefined || obj === null) return undefined;
-
-  // If it's an array like [openTime, open, high, low, close, ...]
   if (Array.isArray(obj)) {
-    // common OHLC arrays put close at index 4
     if (obj.length > 4) return toNumber(obj[4]);
   }
-
-  // direct fields
   if (obj.close !== undefined) return toNumber(obj.close);
   if (obj.c !== undefined) return toNumber(obj.c);
   if (obj.price !== undefined) return toNumber(obj.price);
   if (obj.closePrice !== undefined) return toNumber(obj.closePrice);
-
-  // Binance style kline nested object
   if (obj.k) {
     if (obj.k.c !== undefined) return toNumber(obj.k.c);
     if (obj.k.close !== undefined) return toNumber(obj.k.close);
     if (obj.k[4] !== undefined) return toNumber(obj.k[4]);
   }
-
-  // maybe data has 'p' or 'last' etc.
   if (obj.p !== undefined) return toNumber(obj.p);
   if (obj.last !== undefined) return toNumber(obj.last);
-
   return undefined;
 }
-
 function extractTs(obj) {
   if (obj === undefined || obj === null) return undefined;
-
-  // common props: t, time, ts, timestamp
   if (obj.t !== undefined) return normalizeTs(obj.t);
   if (obj.time !== undefined) return normalizeTs(obj.time);
   if (obj.ts !== undefined) return normalizeTs(obj.ts);
   if (obj.timestamp !== undefined) return normalizeTs(obj.timestamp);
   if (obj.openTime !== undefined) return normalizeTs(obj.openTime);
   if (obj.k && obj.k.t !== undefined) return normalizeTs(obj.k.t);
-  // array case: index 0 often openTime
   if (Array.isArray(obj) && obj.length > 0) return normalizeTs(obj[0]);
-
   return undefined;
 }
 
 export default function App() {
+  const API_BASE = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "https://aka-g2l0.onrender.com";
+  const WS_URL = (typeof window !== "undefined" && window.location && window.location.origin) ? (window.location.origin.replace(/^http/, "ws")) : "wss://aka-g2l0.onrender.com";
+
   const [status, setStatus] = useState("connecting");
   const [signal, setSignal] = useState(null);
-  const [prices, setPrices] = useState([]); // { t: ms, close: number }
+  const [prices, setPrices] = useState([]); // { t: ms, close: number, symbol }
   const [lastRaw, setLastRaw] = useState(null);
+  const [selectedSymbol, setSelectedSymbol] = useState("btcusdt");
+  const [availableSymbols, setAvailableSymbols] = useState(["btcusdt","ethusdt","bnbusdt"]);
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
-    const ws = new WebSocket("wss://aka-g2l0.onrender.com");
+    // fetch available symbols (optional)
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/available-symbols`);
+        const j = await r.json();
+        if (j && Array.isArray(j.symbols)) setAvailableSymbols(j.symbols);
+      } catch (e) {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => setStatus("connected (ws)");
     ws.onclose = () => setStatus("disconnected");
@@ -83,41 +81,21 @@ export default function App() {
         parsed = JSON.parse(ev.data);
       } catch (e) {
         console.error("ws parse error raw:", ev.data, e);
-        setLastRaw(String(ev.data).slice(0, 2000)); // store truncated raw
+        setLastRaw(String(ev.data).slice(0, 2000));
         return;
       }
 
-      console.log("WS MSG:", parsed);
-      setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000)); // truncated pretty
+      setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000));
 
-      // Sometimes backend just sends an object without 'type'
-      const type = parsed.type || parsed.msgType || parsed.t || undefined;
-
-      // Generic price handler: try to find data payload
+      // handle by type
       if (parsed.type === "price" || parsed.type === "ohlc" || (parsed.data && parsed.data.close !== undefined)) {
         const p = parsed.data || parsed.payload || parsed;
         const close = extractClose(p);
         const t = extractTs(p);
+        const sym = (p && p.symbol) || (parsed.data && parsed.data.symbol) || undefined;
         if (close !== undefined) {
           setPrices((prev) => {
-            const next = [...prev, { t: t || Date.now(), close }];
-            if (next.length > 200) next.shift();
-            return next;
-          });
-        } else {
-          console.warn("price message but couldn't extract close:", parsed);
-        }
-        return;
-      }
-
-      // Binance-style kline message (some websockets send {k: {...}} inside)
-      if (parsed.k || parsed.e === "kline") {
-        const k = parsed.k || parsed;
-        const close = extractClose(k);
-        const t = extractTs(k);
-        if (close !== undefined) {
-          setPrices((prev) => {
-            const next = [...prev, { t: t || Date.now(), close }];
+            const next = [...prev, { t: t || Date.now(), close, symbol: sym || selectedSymbol }];
             if (next.length > 200) next.shift();
             return next;
           });
@@ -125,50 +103,52 @@ export default function App() {
         return;
       }
 
-      // Signal type (explicit) -> normalize ts & set
       if (parsed.type === "signal" || parsed.signal) {
         const rawSignal = parsed.data || parsed.signal || parsed;
-        // clone and normalize ts if present
         const s = { ...rawSignal };
         const tsCandidate = extractTs(rawSignal);
         if (tsCandidate) s.ts = tsCandidate;
         setSignal(s);
+        if (s.symbol) setSelectedSymbol((prev) => s.symbol.toLowerCase());
         return;
       }
 
-      // Fallbacks: if message has price-like fields at top-level
+      if (parsed.type === "symbol_changed" || parsed.type === "symbol-change") {
+        const sym = parsed.data && parsed.data.symbol;
+        if (sym) setSelectedSymbol(sym.toLowerCase());
+        return;
+      }
+
       const maybeClose = extractClose(parsed);
       const maybeTs = extractTs(parsed);
       if (maybeClose !== undefined) {
         setPrices((prev) => {
-          const next = [...prev, { t: maybeTs || Date.now(), close: maybeClose }];
+          const next = [...prev, { t: maybeTs || Date.now(), close: maybeClose, symbol: selectedSymbol }];
           if (next.length > 200) next.shift();
           return next;
         });
         return;
       }
 
-      // If message contains lastSignal endpoint shape: { signal: {...} }
       if (parsed.signal && typeof parsed.signal === "object") {
         const s = { ...parsed.signal };
         const tsCandidate = extractTs(parsed.signal);
         if (tsCandidate) s.ts = tsCandidate;
         setSignal(s);
+        if (s.symbol) setSelectedSymbol((prev) => s.symbol.toLowerCase());
         return;
       }
 
-      // otherwise just log it (for debugging)
       console.info("Unhandled ws message:", parsed);
     };
 
-    // fallback polling for last-signal
+    // poll fallback for last-signal
     let stopped = false;
     const fetchLast = async () => {
       try {
-        const res = await fetch("https://aka-g2l0.onrender.com/api/last-signal");
+        const res = await fetch(`${API_BASE}/api/last-signal`);
         const j = await res.json();
         if (!stopped && j) {
-          // many APIs return { signal: {...} } or the signal directly
           const rawSignal = j.signal || j;
           if (rawSignal) {
             const s = { ...rawSignal };
@@ -176,10 +156,11 @@ export default function App() {
             if (tsCandidate) s.ts = tsCandidate;
             setSignal(s);
             setLastRaw(JSON.stringify(j, null, 2).slice(0, 2000));
+            if (s.symbol) setSelectedSymbol((prev) => s.symbol.toLowerCase());
           }
         }
       } catch (err) {
-        console.warn("fetchLast error", err);
+        // console.warn("fetchLast error", err);
       }
     };
     fetchLast();
@@ -190,29 +171,77 @@ export default function App() {
       clearInterval(poll);
       ws.close();
     };
-  }, []);
+  }, [API_BASE, WS_URL]);
+
+  async function changeSymbol(sym) {
+    setSwitching(true);
+    try {
+      const res = await fetch(`${API_BASE}/change-symbol`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: sym }),
+      });
+      const j = await res.json();
+      if (j && j.ok) {
+        setSelectedSymbol(j.symbol.toLowerCase());
+      } else {
+        console.error("change-symbol failed", j);
+        alert("Switch failed: " + (j && j.error ? j.error : "unknown"));
+      }
+    } catch (e) {
+      console.error("changeSymbol err", e);
+      alert("Switch error: " + e.message);
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   return (
     <div style={{ background: "#0b1220", color: "#e6eef8", minHeight: "100vh", padding: 20, fontFamily: "sans-serif" }}>
-      <h1 style={{ fontSize: 22 }}>🚀 Live Binance Signal (BTCUSDT)</h1>
+      <h1 style={{ fontSize: 22 }}>🚀 Live Binance Signal ({selectedSymbol ? selectedSymbol.toUpperCase() : "—"})</h1>
       <p style={{ opacity: 0.8 }}>Status: {status}</p>
 
       <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <select
+              value={selectedSymbol}
+              onChange={(e) => setSelectedSymbol(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 6, background: "#031022", color: "#e6eef8", border: "1px solid rgba(255,255,255,0.06)" }}
+            >
+              {availableSymbols.map((s) => (
+                <option key={s} value={s}>
+                  {s.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => changeSymbol(selectedSymbol)}
+              disabled={switching}
+              style={{ padding: "8px 12px", borderRadius: 6, background: switching ? "#94a3b8" : "#06b6d4", color: "#042a2b", border: "none" }}
+            >
+              {switching ? "Switching..." : "Switch"}
+            </button>
+            <div style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>{/* hint area */}</div>
+          </div>
+
           <h3>Price (recent)</h3>
           <div style={{ height: 220, overflow: "auto", padding: 6 }}>
-            {prices.slice().reverse().map((p, i) => (
-              <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
-                {p.t ? new Date(p.t).toLocaleTimeString() : "—"} — {p.close !== undefined ? Number(p.close).toFixed(2) : "—"}
-              </div>
-            ))}
+            {prices
+              .slice()
+              .reverse()
+              .map((p, i) => (
+                <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                  {p.t ? new Date(p.t).toLocaleTimeString() : "—"} — {p.close !== undefined ? Number(p.close).toFixed(2) : "—"} {p.symbol ? `(${p.symbol.toUpperCase()})` : ""}
+                </div>
+              ))}
           </div>
 
           <div style={{ marginTop: 10 }}>
             <button
               onClick={async () => {
                 try {
-                  await fetch("https://aka-g2l0.onrender.com/push-ohlc", {
+                  await fetch(`${API_BASE}/push-ohlc`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify([
@@ -236,8 +265,8 @@ export default function App() {
           <h3>Latest Signal</h3>
           {signal ? (
             <div>
-              <p><b>Symbol:</b> {signal.symbol || signal.symbolName || "—"}</p>
-              <p><b>Signal:</b> {signal.signal || signal.action || "—"}</p>
+              <p><b>Symbol:</b> {signal.symbol || "—"}</p>
+              <p><b>Signal:</b> {signal.signal || "—"}</p>
               {signal.entry && <p><b>Entry:</b> {signal.entry}</p>}
               {signal.stopLoss && <p><b>SL:</b> {signal.stopLoss}</p>}
               {signal.takeProfit && <p><b>TP:</b> {signal.takeProfit}</p>}
