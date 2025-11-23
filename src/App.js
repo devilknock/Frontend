@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 export default function App() {
   const [status, setStatus] = useState("connecting");
   const [signal, setSignal] = useState(null);
-  const [prices, setPrices] = useState([]);
+  const [prices, setPrices] = useState([]); // simple price series for chart
 
   useEffect(() => {
     const ws = new WebSocket("wss://aka-g2l0.onrender.com");
@@ -19,61 +19,61 @@ export default function App() {
         if (msg.type === "price") {
           const p = msg.data;
 
+          // FIX: use milliseconds → p.t * 1000
           setPrices((prev) => {
-            const next = [...prev, { t: p.t, close: p.close }];
+            const next = [
+              ...prev,
+              { t: p.t * 1000, close: Number(p.close) }
+            ];
             if (next.length > 200) next.shift();
             return next;
           });
-        }
 
-        if (msg.type === "signal") {
-          setSignal(msg.data);
-        }
+        } else if (msg.type === "signal") {
+          // FIX SIGNAL TIMESTAMP TOO
+          const data = msg.data;
+          if (data.ts) data.ts = data.ts * 1000;
+          setSignal(data);
 
-        if (msg.type === "status") {
+        } else if (msg.type === "status") {
           setStatus(msg.data);
         }
+
       } catch (e) {
-        console.error("ws parse error", e);
+        console.error("ws parse err", e);
       }
     };
 
-    // Poll last signal (fallback)
-    let stop = false;
+    // fallback polling for last-signal
+    let stopped = false;
     const fetchLast = async () => {
       try {
         const res = await fetch("https://aka-g2l0.onrender.com/api/last-signal");
         const j = await res.json();
-        if (!stop && j && j.signal) setSignal(j);
+        if (!stopped && j && j.signal) {
+          if (j.ts) j.ts = j.ts * 1000; // FIX TS
+          setSignal(j);
+        }
       } catch {}
     };
     fetchLast();
     const poll = setInterval(fetchLast, 5000);
 
     return () => {
-      stop = true;
+      stopped = true;
       clearInterval(poll);
       ws.close();
     };
   }, []);
 
-  // Function to convert timestamp properly
-  const formatTime = (raw) => {
-    const t = Number(raw);
-    const d = new Date(t < 9999999999 ? t * 1000 : t);
-    return isNaN(d.getTime()) ? "Invalid" : d.toLocaleTimeString();
-  };
-
   return (
-    <div
-      style={{
-        background: "#0b1220",
-        color: "#e6eef8",
-        minHeight: "100vh",
-        padding: 20,
-        fontFamily: "sans-serif",
-      }}
-    >
+    <div style={{
+      background: "#0b1220",
+      color: "#e6eef8",
+      minHeight: "100vh",
+      padding: 20,
+      fontFamily: "sans-serif"
+    }}>
       <h1 style={{ fontSize: 22 }}>🚀 Live Binance Signal (BTCUSDT)</h1>
       <p style={{ opacity: 0.8 }}>Status: {status}</p>
 
@@ -82,10 +82,10 @@ export default function App() {
           marginTop: 10,
           display: "grid",
           gridTemplateColumns: "1fr 320px",
-          gap: 16,
+          gap: 16
         }}
       >
-        {/* PRICE LIST */}
+        {/* PRICE BOX */}
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
           <h3>Price (recent)</h3>
 
@@ -99,15 +99,15 @@ export default function App() {
                   style={{
                     fontSize: 12,
                     padding: "2px 0",
-                    borderBottom: "1px solid rgba(255,255,255,0.05)",
+                    borderBottom: "1px solid rgba(255,255,255,0.02)"
                   }}
                 >
-                  {formatTime(p.t)} — {p.close}
+                  {/* FIX: show proper time */}
+                  {new Date(p.t).toLocaleTimeString()} — {p.close}
                 </div>
               ))}
           </div>
 
-          {/* TEST BUTTON */}
           <div style={{ marginTop: 10 }}>
             <button
               onClick={async () => {
@@ -117,30 +117,30 @@ export default function App() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify([
                       {
-                        t: Math.floor(Date.now() / 1000),
+                        t: 1,
                         open: 100,
                         high: 105,
                         low: 99,
                         close: 102,
-                        volume: 1000,
+                        volume: 1000
                       },
                       {
-                        t: Math.floor(Date.now() / 1000) + 60,
+                        t: 2,
                         open: 102,
                         high: 106,
                         low: 101,
                         close: 104,
-                        volume: 900,
+                        volume: 900
                       },
                       {
-                        t: Math.floor(Date.now() / 1000) + 120,
+                        t: 3,
                         open: 104,
                         high: 107,
                         low: 103,
                         close: 106,
-                        volume: 950,
-                      },
-                    ]),
+                        volume: 950
+                      }
+                    ])
                   });
                 } catch (e) {}
               }}
@@ -149,7 +149,7 @@ export default function App() {
                 borderRadius: 6,
                 background: "#06b6d4",
                 color: "#042a2b",
-                border: "none",
+                border: "none"
               }}
             >
               Send sample OHLC (test)
@@ -160,47 +160,20 @@ export default function App() {
         {/* SIGNAL BOX */}
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
           <h3>Latest Signal</h3>
-
           {signal ? (
             <div>
-              <p>
-                <b>Symbol:</b> {signal.symbol}
-              </p>
-              <p>
-                <b>Signal:</b> {signal.signal}
-              </p>
-              {signal.entry && (
-                <p>
-                  <b>Entry:</b> {signal.entry}
-                </p>
-              )}
-              {signal.stopLoss && (
-                <p>
-                  <b>SL:</b> {signal.stopLoss}
-                </p>
-              )}
-              {signal.takeProfit && (
-                <p>
-                  <b>TP:</b> {signal.takeProfit}
-                </p>
-              )}
-              {signal.confidence && (
-                <p>
-                  <b>Confidence:</b> {signal.confidence}
-                </p>
-              )}
-              {signal.rsi !== undefined && (
-                <p>
-                  <b>RSI:</b> {signal.rsi}
-                </p>
-              )}
+              <p><b>Symbol:</b> {signal.symbol}</p>
+              <p><b>Signal:</b> {signal.signal}</p>
+              {signal.entry && <p><b>Entry:</b> {signal.entry}</p>}
+              {signal.stopLoss && <p><b>SL:</b> {signal.stopLoss}</p>}
+              {signal.takeProfit && <p><b>TP:</b> {signal.takeProfit}</p>}
+              {signal.confidence && <p><b>Confidence:</b> {signal.confidence}</p>}
+              {signal.rsi !== undefined && <p><b>RSI:</b> {signal.rsi}</p>}
+
+              {/* FIX: proper time */}
               {signal.ts && (
                 <p style={{ fontSize: 12, opacity: 0.8 }}>
-                  {new Date(
-                    signal.ts < 9999999999
-                      ? signal.ts * 1000
-                      : signal.ts
-                  ).toLocaleString()}
+                  {new Date(signal.ts).toLocaleString()}
                 </p>
               )}
             </div>
