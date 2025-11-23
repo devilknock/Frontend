@@ -84,9 +84,22 @@ export default function App() {
 
       setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000));
 
+      // Use a single "data" object to read price/symbol/signal consistently
+      const data = parsed.data || parsed.payload || parsed;
+
+      // If the server sends a symbol inside the price message, reflect it in UI.
+      // (This only updates the frontend selectedSymbol for display — it does NOT call change-symbol API.)
+      if (data && data.symbol) {
+        try {
+          const sym = String(data.symbol).toLowerCase();
+          // avoid toggling while user intentionally switching
+          setSelectedSymbol((prev) => (switching ? prev : sym));
+        } catch {}
+      }
+
       // ---- Price update ----
-      const close = extractClose(parsed.data || parsed.payload || parsed);
-      const ts = extractTs(parsed.data || parsed.payload || parsed);
+      const close = extractClose(data);
+      const ts = extractTs(data);
 
       if (close !== undefined) {
         setPrices((p) => {
@@ -96,13 +109,17 @@ export default function App() {
         });
       }
 
-      // ---- Signal update ----
-      const rawSignal = parsed.signal || parsed.data?.signal || (parsed.type === "signal" ? parsed.data : null);
+      // ---- Signal update (more robust) ----
+      const rawSignal =
+        parsed.signal ||
+        data?.signal ||
+        (parsed.type === "signal" ? data : null);
+
       if (rawSignal) {
         const s = { ...rawSignal };
         const sTs = extractTs(rawSignal);
         if (sTs) s.ts = sTs;
-        setSignal((prev) => ({ ...prev, ...s })); // <-- DON'T RESET, MERGE
+        setSignal((prev) => ({ ...prev, ...s })); // merge so we don't lose partial fields
       }
     };
 
@@ -126,7 +143,7 @@ export default function App() {
       clearInterval(poll);
       ws.close();
     };
-  }, []);
+  }, [switching]); // added switching to deps so we can check it inside message handler
 
   // ---------- Change symbol ----------
   async function changeSymbol(sym) {
