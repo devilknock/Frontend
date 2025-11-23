@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 
+// ---------- Utils ----------
 function toNumber(v) {
   if (v === null || v === undefined) return undefined;
   const n = Number(v);
@@ -13,10 +14,8 @@ function normalizeTs(rawTs) {
   return n;
 }
 function extractClose(obj) {
-  if (obj === undefined || obj === null) return undefined;
-  if (Array.isArray(obj)) {
-    if (obj.length > 4) return toNumber(obj[4]);
-  }
+  if (!obj) return undefined;
+  if (Array.isArray(obj) && obj.length > 4) return toNumber(obj[4]);
   if (obj.close !== undefined) return toNumber(obj.close);
   if (obj.c !== undefined) return toNumber(obj.c);
   if (obj.price !== undefined) return toNumber(obj.price);
@@ -31,7 +30,7 @@ function extractClose(obj) {
   return undefined;
 }
 function extractTs(obj) {
-  if (obj === undefined || obj === null) return undefined;
+  if (!obj) return undefined;
   if (obj.t !== undefined) return normalizeTs(obj.t);
   if (obj.time !== undefined) return normalizeTs(obj.time);
   if (obj.ts !== undefined) return normalizeTs(obj.ts);
@@ -42,6 +41,7 @@ function extractTs(obj) {
   return undefined;
 }
 
+// ---------- App ----------
 export default function App() {
   const API_BASE = "https://aka-g2l0.onrender.com";
   const WS_URL = "wss://aka-g2l0.onrender.com";
@@ -51,23 +51,26 @@ export default function App() {
   const [prices, setPrices] = useState([]);
   const [lastRaw, setLastRaw] = useState(null);
   const [selectedSymbol, setSelectedSymbol] = useState("btcusdt");
-  const [availableSymbols, setAvailableSymbols] = useState(["btcusdt","ethusdt","bnbusdt"]);
+  const [availableSymbols, setAvailableSymbols] = useState(["btcusdt", "ethusdt", "bnbusdt"]);
   const [switching, setSwitching] = useState(false);
 
+  // ---------- Load symbols ----------
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch(`${API_BASE}/available-symbols`);
         const j = await r.json();
         if (j && Array.isArray(j.symbols)) setAvailableSymbols(j.symbols);
-      } catch (e) {}
+      } catch {}
     })();
   }, []);
 
+  // ---------- Main WS ----------
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
+    let stopped = false;
 
-    ws.onopen = () => setStatus("connected (ws)");
+    ws.onopen = () => setStatus("connected");
     ws.onclose = () => setStatus("disconnected");
     ws.onerror = () => setStatus("error");
 
@@ -76,104 +79,113 @@ export default function App() {
       try {
         parsed = JSON.parse(ev.data);
       } catch {
-        setLastRaw(String(ev.data).slice(0, 2000));
         return;
       }
 
-      setLastRaw(JSON.stringify(parsed, null, 2));
+      setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000));
 
-      if (parsed.type === "price" || parsed.type === "ohlc" || (parsed.data && parsed.data.close !== undefined)) {
-        const p = parsed.data || parsed;
-        const close = extractClose(p);
-        const t = extractTs(p);
-        const sym = p.symbol || selectedSymbol;
+      // ---- Price update ----
+      const close = extractClose(parsed.data || parsed.payload || parsed);
+      const ts = extractTs(parsed.data || parsed.payload || parsed);
 
-        if (close !== undefined) {
-          setPrices((prev) => {
-            const next = [...prev, { t: t || Date.now(), close, symbol: sym }];
-            if (next.length > 200) next.shift();
-            return next;
-          });
-        }
-        return;
+      if (close !== undefined) {
+        setPrices((p) => {
+          const next = [...p, { t: ts || Date.now(), close }];
+          if (next.length > 200) next.shift();
+          return next;
+        });
       }
 
-      if (parsed.type === "signal") {
-        const raw = parsed.data;
-        const ts = extractTs(raw);
-        const s = { ...raw, ts };
-        setSignal(s);
-
-        if (s.symbol) setSelectedSymbol(s.symbol.toLowerCase());
-        return;
-      }
-
-      if (parsed.type === "symbol_changed") {
-        const s = parsed.data.symbol;
-        if (s) setSelectedSymbol(s.toLowerCase());
-        return;
+      // ---- Signal update ----
+      const rawSignal = parsed.signal || parsed.data?.signal || (parsed.type === "signal" ? parsed.data : null);
+      if (rawSignal) {
+        const s = { ...rawSignal };
+        const sTs = extractTs(rawSignal);
+        if (sTs) s.ts = sTs;
+        setSignal((prev) => ({ ...prev, ...s })); // <-- DON'T RESET, MERGE
       }
     };
 
-    const fetchLast = async () => {
+    // ---------- Poll fallback every 5s ----------
+    const poll = setInterval(async () => {
+      if (stopped) return;
       try {
         const r = await fetch(`${API_BASE}/api/last-signal`);
         const j = await r.json();
-        const raw = j.signal || j;
-        const ts = extractTs(raw);
-        const s = { ...raw, ts };
-        setSignal(s);
+        if (j?.signal) {
+          const s = { ...j.signal };
+          const sTs = extractTs(j.signal);
+          if (sTs) s.ts = sTs;
+          setSignal((prev) => ({ ...prev, ...s }));
+        }
       } catch {}
-    };
-
-    fetchLast();
-    const poll = setInterval(fetchLast, 5000);
+    }, 5000);
 
     return () => {
-      ws.close();
+      stopped = true;
       clearInterval(poll);
+      ws.close();
     };
   }, []);
 
+  // ---------- Change symbol ----------
   async function changeSymbol(sym) {
     setSwitching(true);
     try {
-      const res = await fetch(`${API_BASE}/change-symbol`, {
+      const r = await fetch(`${API_BASE}/change-symbol`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: sym })
+        body: JSON.stringify({ symbol: sym }),
       });
-      const j = await res.json();
-      if (j.ok) {
-        setSelectedSymbol(sym.toLowerCase());
-        setPrices([]);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+      const j = await r.json();
+      if (j.ok) setSelectedSymbol(j.symbol.toLowerCase());
+    } catch {}
     setSwitching(false);
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Trading Indicator Engine</h2>
+    <div style={{ background: "#0b1220", color: "#e6eef8", minHeight: "100vh", padding: 20, fontFamily: "sans-serif" }}>
+      <h1 style={{ fontSize: 22 }}>🚀 Live Binance Signal ({selectedSymbol.toUpperCase()})</h1>
+      <p>Status: {status}</p>
 
-      <div>Status: {status}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+        {/* ---------- Prices ---------- */}
+        <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
+          <h3>Price (recent)</h3>
+          <div style={{ height: 220, overflow: "auto" }}>
+            {prices.slice().reverse().map((p, i) => (
+              <div key={i} style={{ fontSize: 12, opacity: 0.9 }}>
+                {new Date(p.t).toLocaleTimeString()} — {p.close?.toFixed(2)}
+              </div>
+            ))}
+          </div>
+        </div>
 
-      <label>Select Symbol:</label>
-      <select
-        disabled={switching}
-        value={selectedSymbol}
-        onChange={(e) => changeSymbol(e.target.value)}
-      >
-        {availableSymbols.map((s) => (
-          <option key={s} value={s}>
-            {s.toUpperCase()}
-          </option>
-        ))}
-      </select>
+        {/* ---------- Signal Panel ---------- */}
+        <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
+          <h3>Latest Signal</h3>
 
-      <pre>{lastRaw}</pre>
+          {signal ? (
+            <div style={{ fontSize: 14 }}>
+              <p><b>Symbol:</b> {signal.symbol || selectedSymbol}</p>
+              <p><b>Signal:</b> {signal.signal}</p>
+              {signal.entry && <p><b>Entry:</b> {signal.entry}</p>}
+              {signal.stopLoss && <p><b>SL:</b> {signal.stopLoss}</p>}
+              {signal.takeProfit && <p><b>TP:</b> {signal.takeProfit}</p>}
+              {signal.confidence && <p><b>Confidence:</b> {signal.confidence}</p>}
+              {signal.rsi && <p><b>RSI:</b> {signal.rsi}</p>}
+              {signal.ts && <p style={{ fontSize: 11 }}>{new Date(signal.ts).toLocaleString()}</p>}
+            </div>
+          ) : (
+            <p>No signal yet</p>
+          )}
+
+          <h4 style={{ fontSize: 13, marginTop: 10 }}>RAW (debug)</h4>
+          <pre style={{ fontSize: 11, maxHeight: 150, overflow: "auto", background: "#031022", padding: 8 }}>
+            {lastRaw || "—"}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }
