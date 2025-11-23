@@ -62,7 +62,7 @@ export default function App() {
           <div style={{ height: 220, overflow: "auto", padding: 6 }}>
             {prices.slice().reverse().map((p, i) => (
               <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
-                {new Date(p.t).toLocaleTimeString()} — {p.close}
+                {new Date(Number(p.t).toLocaleTimeString()} — {p.close}
               </div>
             ))}
           </div>
