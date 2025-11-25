@@ -66,7 +66,7 @@ export default function App() {
   const [signal, setSignal] = useState(null);
   const [prices, setPrices] = useState([]); // { t: ms, close: number }
   const [lastRaw, setLastRaw] = useState(null);
-
+  const [pattern, setPattern] = useState("None");
   useEffect(() => {
     const ws = new WebSocket("wss://aka-g2l0.onrender.com");
 
@@ -124,7 +124,14 @@ export default function App() {
         }
         return;
       }
-
+      
+      // PATTERN DETECTION
+     if (parsed.type === "pattern") {
+      console.log("Pattern found:", parsed.data.pattern);
+      setPattern(parsed.data.pattern);
+      return;
+    }
+      
       // Signal type (explicit) -> normalize ts & set
       if (parsed.type === "signal" || parsed.signal) {
         const rawSignal = parsed.data || parsed.signal || parsed;
@@ -257,7 +264,15 @@ export default function App() {
             <p style={{ fontSize: 11, opacity: 0.7 }}>Open browser console to see full WS logs (console.log)</p>
           </div>
         </div>
-      </div>
+      </div> 
+            <div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
+  <h3>Latest Pattern</h3>
+  {pattern ? (
+    <div>{pattern}</div>
+  ) : (
+    "No pattern yet"
+  )}
+</div>
     </div>
   );
 }
