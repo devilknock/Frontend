@@ -91,7 +91,7 @@ export default function App() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>📈 Trading Signal Indicator</h1>
-        <p style={{ opacity: 0.7, margin: 0, fontSize: 12 }}>Created by: <b>Ansh && Nitin</b></p>
+        <p style={{ opacity: 0.7, margin: 0, fontSize: 12 }}>Created by: <b>Ansh & Nitin</b></p>
       </div>
 
       <p style={{ opacity: 0.7 }}>{status}</p>
@@ -141,4 +141,4 @@ export default function App() {
       </div>
     </div>
   );
-        }
+}
