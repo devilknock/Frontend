@@ -1,256 +1,131 @@
 import React, { useEffect, useState } from "react";
 
-function toNumber(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function normalizeTs(rawTs) {
-  const n = toNumber(rawTs);
-  if (n === undefined) return undefined;
-  return n < 1e12 ? n * 1000 : n; // convert sec → ms
-}
-
-function extractClose(obj) {
-  try {
-    if (!obj) return undefined;
-    if (Array.isArray(obj) && obj.length > 4) return toNumber(obj[4]);
-
-    return (
-      toNumber(obj?.close) ??
-      toNumber(obj?.c) ??
-      toNumber(obj?.price) ??
-      toNumber(obj?.closePrice) ??
-      (obj?.k
-        ? toNumber(obj.k.c) ??
-          toNumber(obj.k.close) ??
-          (Array.isArray(obj.k) ? toNumber(obj.k[4]) : undefined)
-        : undefined) ??
-      toNumber(obj?.p) ??
-      toNumber(obj?.last)
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-function extractTs(obj) {
-  try {
-    if (!obj) return undefined;
-
-    return (
-      normalizeTs(obj?.t) ??
-      normalizeTs(obj?.time) ??
-      normalizeTs(obj?.ts) ??
-      normalizeTs(obj?.timestamp) ??
-      normalizeTs(obj?.openTime) ??
-      (obj?.k ? normalizeTs(obj.k.t) : undefined) ??
-      (Array.isArray(obj) ? normalizeTs(obj[0]) : undefined)
-    );
-  } catch {
-    return undefined;
-  }
-}
-
 export default function App() {
-  const [status, setStatus] = useState("connecting");
+  const [price, setPrice] = useState(null);
   const [signal, setSignal] = useState(null);
-  const [prices, setPrices] = useState([]);
-  const [lastRaw, setLastRaw] = useState(null);
-  const [pattern, setPattern] = useState("None");
+  const [pattern, setPattern] = useState(null);
+
+  // User Inputs
+  const [range, setRange] = useState({ min: "", max: "" });
+  const [sl, setSL] = useState("");
+  const [tp, setTP] = useState("");
 
   useEffect(() => {
-    const ws = new WebSocket("wss://aka-g2l0.onrender.com");
+    const ws = new WebSocket("ws://localhost:4000");
 
-    ws.onopen = () => setStatus("connected (ws)");
-    ws.onclose = () => setStatus("disconnected");
-    ws.onerror = () => setStatus("error");
+    ws.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
 
-    ws.onmessage = (ev) => {
-      let parsed;
-      try {
-        parsed = JSON.parse(ev.data);
-      } catch {
-        setLastRaw(String(ev.data).slice(0, 2000));
-        return;
+      // PRICE
+      if (data.type === "price") {
+        setPrice(data.data.close);
       }
 
-      setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000));
-
-      // ---------- PRICE / OHLC ----------
-      if (parsed?.type === "price" || parsed?.type === "ohlc") {
-        const p = parsed.data || parsed;
-        const close = extractClose(p);
-        const t = extractTs(p);
-
-        if (close !== undefined && Number.isFinite(close)) {
-          const tsSafe = Number.isFinite(t) ? t : Date.now();
-          setPrices((prev) => {
-            const arr = [...prev, { t: tsSafe, close }];
-            if (arr.length > 200) arr.shift();
-            return arr;
-          });
-        }
-        return;
+      // SIGNAL
+      if (data.type === "signal") {
+        setSignal(data.data);
       }
 
-      // ---------- BINANCE KLINE ----------
-      if (parsed?.k && typeof parsed.k === "object") {
-        const close = extractClose(parsed.k);
-        const t = extractTs(parsed.k);
-
-        if (close !== undefined && Number.isFinite(close)) {
-          const tsSafe = Number.isFinite(t) ? t : Date.now();
-          setPrices((prev) => {
-            const arr = [...prev, { t: tsSafe, close }];
-            if (arr.length > 200) arr.shift();
-            return arr;
-          });
-        }
-        return;
-      }
-
-      // ---------- PATTERN ----------
-      if (parsed?.type === "pattern") {
-        const pd = parsed.data;
-
-  // Agar object hai → directly set
-  if (pd && typeof pd === "object") {
-    setPattern(pd);
-  }
-  // Agar string hai → object bana do
-  else if (typeof pd === "string") {
-    setPattern({ pattern: pd });
-  }
-  // Otherwise safe fallback
-  else {
-    setPattern({ pattern: "Unknown" });
-  }
-
-  return;
-        }
-        return;
-      }
-
-      // ---------- SIGNAL ----------
-      if (parsed?.type === "signal" || parsed?.signal) {
-        const raw = parsed.data ?? parsed.signal ?? parsed;
-        const safeRaw = raw && typeof raw === "object" ? raw : { value: raw };
-        const ts = extractTs(raw);
-        setSignal({ ...safeRaw, ts });
-        return;
-      }
-
-      // ---------- GENERIC PRICE FALLBACK ----------
-      const maybeClose = extractClose(parsed);
-      const maybeTs = extractTs(parsed);
-
-      if (maybeClose !== undefined && Number.isFinite(maybeClose)) {
-        const tsSafe = Number.isFinite(maybeTs) ? maybeTs : Date.now();
-        setPrices((prev) => {
-          const arr = [...prev, { t: tsSafe, close: maybeClose }];
-          if (arr.length > 200) arr.shift();
-          return arr;
-        });
-        return;
+      // PATTERN
+      if (data.type === "pattern") {
+        setPattern(data.data.pattern);
       }
     };
 
-    // ---------- API fallback (/api/last-signal) ----------
-    let stop = false;
+    ws.onopen = () => console.log("Frontend connected");
+    ws.onclose = () => console.log("Disconnected");
 
-    const fetchLast = async () => {
-      try {
-        const res = await fetch("https://aka-g2l0.onrender.com/api/last-signal");
-        const j = await res.json();
-        if (!stop && j) {
-          const raw = j.signal ?? j;
-          const safeRaw = raw && typeof raw === "object" ? raw : { value: raw };
-          const ts = extractTs(raw);
-          setSignal({ ...safeRaw, ts });
-          setLastRaw(JSON.stringify(j, null, 2).slice(0, 2000));
-        }
-      } catch {}
-    };
-
-    fetchLast();
-    const int = setInterval(fetchLast, 5000);
-
-    return () => {
-      stop = true;
-      try {
-        ws.close();
-      } catch {}
-      clearInterval(int);
-    };
+    return () => ws.close();
   }, []);
 
-  const safePrices = Array.isArray(prices) ? prices : [];
+  // Price-Range Filter
+  function filterStatus() {
+    if (!price) return "";
+    if (range.min && price < Number(range.min)) return "⛔ Price Below Range";
+    if (range.max && price > Number(range.max)) return "⛔ Price Above Range";
+    return "✅ Price Inside Range";
+  }
+
+  // Stop Loss / Take Profit status
+  function slTpStatus() {
+    if (!price) return "";
+
+    if (sl && price <= Number(sl)) return "⚠️ Stop Loss Hit!";
+    if (tp && price >= Number(tp)) return "🎯 Take Profit Hit!";
+    return "⌛ Waiting…";
+  }
 
   return (
-    <div style={{ background: "#0b1220", color: "#e6eef8", minHeight: "100vh", padding: 20 }}>
-      <h1 style={{ fontSize: 22 }}>🚀 Live Binance Signal (BTCUSDT)</h1>
-      <p>Status: {status}</p>
+    <div style={{ padding: 20, fontFamily: "Arial" }}>
+      <h1>Realtime Signal Dashboard</h1>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, marginTop: 10 }}>
-        
-        {/* PRICE LIST */}
-        <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
-          <h3>Price (recent)</h3>
-          <div style={{ height: 220, overflow: "auto", padding: 6 }}>
-            {safePrices
-              .slice()
-              .reverse()
-              .map((p, i) => (
-                <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                  {p.t ? new Date(p.t).toLocaleTimeString() : "—"} —{" "}
-                  {p.close !== undefined
-                    ? Number.isFinite(Number(p.close))
-                      ? Number(p.close).toFixed(2)
-                      : String(p.close)
-                    : "—"}
-                </div>
-              ))}
-          </div>
-        </div>
-
-        {/* SIGNAL BLOCK */}
-        <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
-          <h3>Latest Signal</h3>
-
-          {signal ? (
-            <div>
-              <p><b>Symbol:</b> {signal.symbol ?? signal.symbolName ?? signal.value ?? "—"}</p>
-              <p><b>Signal:</b> {String(signal.signal ?? signal.action ?? signal.value ?? "—")}</p>
-
-              <p><b>Entry:</b> {signal.entry !== undefined ? String(signal.entry) : "—"}</p>
-              <p><b>SL:</b> {signal.stopLoss !== undefined ? String(signal.stopLoss) : "—"}</p>
-              <p><b>TP:</b> {signal.takeProfit !== undefined ? String(signal.takeProfit) : "—"}</p>
-
-              {signal.confidence !== undefined && <p><b>Confidence:</b> {String(signal.confidence)}</p>}
-              {signal.rsi !== undefined && <p><b>RSI:</b> {String(signal.rsi)}</p>}
-              {signal.ts && <p style={{ fontSize: 11, opacity: 0.7 }}>{new Date(signal.ts).toLocaleString()}</p>}
-            </div>
-          ) : (
-            <p>No signal yet</p>
-          )}
-
-          <h4 style={{ fontSize: 13, marginTop: 12 }}>LAST RAW (debug)</h4>
-          <pre style={{ fontSize: 11, background: "#031022", padding: 8, borderRadius: 6, maxHeight: 160, overflow: "auto" }}>
-            {lastRaw || "—"}
-          </pre>
-        </div>
+      {/* PRICE DISPLAY */}
+      <div style={{ marginTop: 20, fontSize: 22 }}>
+        <b>Live Price:</b> {price ?? "Loading..."}
       </div>
 
+      {/* SIGNAL */}
+      {signal && (
+        <div style={{ marginTop: 15 }}>
+          <h2>Signal: {signal.signal}</h2>
+          <p>RSI: {signal.rsi}</p>
+          <p>EMA5: {signal.ema5}</p>
+          <p>EMA20: {signal.ema20}</p>
+        </div>
+      )}
+
       {/* PATTERN */}
-<div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
-  <h3>Latest Pattern</h3>
+      {pattern && (
+        <div
+          style={{
+            marginTop: 20,
+            padding: 10,
+            background: "#eee",
+            borderRadius: 10
+          }}
+        >
+          <h2>Pattern Detected: {pattern}</h2>
+        </div>
+      )}
 
-  <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", color: "#b3b3b3" }}>
-    {pattern ? JSON.stringify(pattern, null, 2) : "No pattern yet"}
-  </pre>
+      {/* USER INPUTS */}
+      <div style={{ marginTop: 30 }}>
+        <h2>Filters & Risk Control</h2>
 
-</div>
+        <label>Min Price:</label>
+        <input
+          type="number"
+          value={range.min}
+          onChange={(e) => setRange({ ...range, min: e.target.value })}
+        />
+
+        <label>Max Price:</label>
+        <input
+          type="number"
+          value={range.max}
+          onChange={(e) => setRange({ ...range, max: e.target.value })}
+        />
+
+        <p>Status: <b>{filterStatus()}</b></p>
+
+        <hr />
+
+        <label>Stop Loss:</label>
+        <input
+          type="number"
+          value={sl}
+          onChange={(e) => setSL(e.target.value)}
+        />
+
+        <label>Take Profit:</label>
+        <input
+          type="number"
+          value={tp}
+          onChange={(e) => setTP(e.target.value)}
+        />
+
+        <p>Status: <b>{slTpStatus()}</b></p>
+      </div>
     </div>
   );
-  }
+}
