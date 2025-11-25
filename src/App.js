@@ -113,11 +113,22 @@ export default function App() {
       // ---------- PATTERN ----------
       if (parsed?.type === "pattern") {
         const pd = parsed.data;
-        const value =
-          (pd && typeof pd === "object" && pd.pattern) ??
-          (typeof pd === "string" ? pd : "Unknown");
 
-        setPattern(value || {});
+  // Agar object hai → directly set
+  if (pd && typeof pd === "object") {
+    setPattern(pd);
+  }
+  // Agar string hai → object bana do
+  else if (typeof pd === "string") {
+    setPattern({ pattern: pd });
+  }
+  // Otherwise safe fallback
+  else {
+    setPattern({ pattern: "Unknown" });
+  }
+
+  return;
+        }
         return;
       }
 
