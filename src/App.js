@@ -16,14 +16,15 @@ function extractClose(obj) {
 
   if (Array.isArray(obj) && obj.length > 4) return toNumber(obj[4]);
 
+  // Use safe access; if obj is primitive, toNumber will handle it
   return (
-    toNumber(obj.close) ??
-    toNumber(obj.c) ??
-    toNumber(obj.price) ??
-    toNumber(obj.closePrice) ??
-    (obj.k ? toNumber(obj.k.c) ?? toNumber(obj.k.close) ?? toNumber(obj.k[4]) : undefined) ??
-    toNumber(obj.p) ??
-    toNumber(obj.last)
+    toNumber(obj?.close) ??
+    toNumber(obj?.c) ??
+    toNumber(obj?.price) ??
+    toNumber(obj?.closePrice) ??
+    (obj?.k ? toNumber(obj.k.c) ?? toNumber(obj.k.close) ?? toNumber(obj.k[4]) : undefined) ??
+    toNumber(obj?.p) ??
+    toNumber(obj?.last)
   );
 }
 
@@ -31,12 +32,12 @@ function extractTs(obj) {
   if (!obj) return undefined;
 
   return (
-    normalizeTs(obj.t) ??
-    normalizeTs(obj.time) ??
-    normalizeTs(obj.ts) ??
-    normalizeTs(obj.timestamp) ??
-    normalizeTs(obj.openTime) ??
-    (obj.k ? normalizeTs(obj.k.t) : undefined) ??
+    normalizeTs(obj?.t) ??
+    normalizeTs(obj?.time) ??
+    normalizeTs(obj?.ts) ??
+    normalizeTs(obj?.timestamp) ??
+    normalizeTs(obj?.openTime) ??
+    (obj?.k ? normalizeTs(obj.k.t) : undefined) ??
     (Array.isArray(obj) ? normalizeTs(obj[0]) : undefined)
   );
 }
@@ -53,20 +54,26 @@ export default function App() {
 
     ws.onopen = () => setStatus("connected (ws)");
     ws.onclose = () => setStatus("disconnected");
-    ws.onerror = () => setStatus("error");
+    ws.onerror = (e) => {
+      console.warn("ws error", e);
+      setStatus("error");
+    };
 
     ws.onmessage = (ev) => {
       let parsed;
       try {
         parsed = JSON.parse(ev.data);
-      } catch {
+      } catch (err) {
+        // show raw text if parse fails
         setLastRaw(String(ev.data).slice(0, 2000));
+        console.warn("ws parse error", err);
         return;
       }
 
       setLastRaw(JSON.stringify(parsed, null, 2).slice(0, 2000));
 
-      if (parsed.type === "price" || parsed.type === "ohlc") {
+      // PRICE / OHLC messages
+      if (parsed?.type === "price" || parsed?.type === "ohlc") {
         const p = parsed.data || parsed;
         const close = extractClose(p);
         const t = extractTs(p);
@@ -76,11 +83,14 @@ export default function App() {
             if (arr.length > 200) arr.shift();
             return arr;
           });
+        } else {
+          console.warn("price message but couldn't extract close:", parsed);
         }
         return;
       }
 
-      if (parsed.k) {
+      // binance kline-ish
+      if (parsed?.k) {
         const close = extractClose(parsed.k);
         const t = extractTs(parsed.k);
         if (close !== undefined) {
@@ -93,18 +103,29 @@ export default function App() {
         return;
       }
 
-      if (parsed.type === "pattern") {
-        setPattern(parsed.data.pattern);
+      // PATTERN (safe)
+      if (parsed?.type === "pattern") {
+        // parsed.data might be object or string or missing -> handle safely
+        const pd = parsed.data;
+        const value =
+          (pd && typeof pd === "object" && pd.pattern) ??
+          (typeof pd === "string" ? pd : undefined) ??
+          "Unknown";
+        setPattern(value);
         return;
       }
 
-      if (parsed.type === "signal" || parsed.signal) {
-        const raw = parsed.data || parsed.signal || parsed;
+      // SIGNAL (safe)
+      if (parsed?.type === "signal" || parsed?.signal) {
+        const raw = parsed.data ?? parsed.signal ?? parsed;
+        // raw may be null/primitive/object - ensure we always store an object
+        const safeRaw = raw && typeof raw === "object" ? raw : { value: raw };
         const ts = extractTs(raw);
-        setSignal({ ...raw, ts });
+        setSignal({ ...safeRaw, ts });
         return;
       }
 
+      // generic price fallback
       const maybeClose = extractClose(parsed);
       const maybeTs = extractTs(parsed);
       if (maybeClose !== undefined) {
@@ -116,12 +137,15 @@ export default function App() {
         return;
       }
 
-      if (parsed.signal && typeof parsed.signal === "object") {
+      // last-signal shape fallback
+      if (parsed?.signal && typeof parsed.signal === "object") {
         const raw = parsed.signal;
         const ts = extractTs(raw);
         setSignal({ ...raw, ts });
         return;
       }
+
+      console.info("Unhandled ws message:", parsed);
     };
 
     let stop = false;
@@ -131,12 +155,15 @@ export default function App() {
         const res = await fetch("https://aka-g2l0.onrender.com/api/last-signal");
         const j = await res.json();
         if (!stop && j) {
-          const raw = j.signal || j;
+          const raw = j.signal ?? j;
+          const safeRaw = raw && typeof raw === "object" ? raw : { value: raw };
           const ts = extractTs(raw);
-          setSignal({ ...raw, ts });
+          setSignal({ ...safeRaw, ts });
           setLastRaw(JSON.stringify(j, null, 2).slice(0, 2000));
         }
-      } catch {}
+      } catch (err) {
+        console.warn("fetchLast error", err);
+      }
     };
 
     fetchLast();
@@ -144,10 +171,15 @@ export default function App() {
 
     return () => {
       stop = true;
-      ws.close();
+      try {
+        ws.close();
+      } catch {}
       clearInterval(int);
     };
   }, []);
+
+  // safety: ensure prices is array before mapping
+  const safePrices = Array.isArray(prices) ? prices : [];
 
   return (
     <div style={{ background: "#0b1220", color: "#e6eef8", minHeight: "100vh", padding: 20 }}>
@@ -159,13 +191,13 @@ export default function App() {
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
           <h3>Price (recent)</h3>
           <div style={{ height: 220, overflow: "auto", padding: 6 }}>
-            {prices
+            {safePrices
               .slice()
               .reverse()
               .map((p, i) => (
                 <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                   {p.t ? new Date(p.t).toLocaleTimeString() : "—"} —{" "}
-                  {p.close !== undefined ? Number(p.close).toFixed(2) : "—"}
+                  {p.close !== undefined ? (Number.isFinite(Number(p.close)) ? Number(p.close).toFixed(2) : String(p.close)) : "—"}
                 </div>
               ))}
           </div>
@@ -177,16 +209,16 @@ export default function App() {
 
           {signal ? (
             <div>
-              <p><b>Symbol:</b> {signal.symbol ?? "—"}</p>
+              <p><b>Symbol:</b> {signal.symbol ?? signal.symbolName ?? signal.value ?? "—"}</p>
               <p><b>Signal:</b> {signal.signal ?? signal.action ?? "—"}</p>
 
-              {/* SAFE FIELDS → ZERO CRASH */}
-              <p><b>Entry:</b> {signal.entry !== undefined ? signal.entry : "—"}</p>
-              <p><b>SL:</b> {signal.stopLoss !== undefined ? signal.stopLoss : "—"}</p>
-              <p><b>TP:</b> {signal.takeProfit !== undefined ? signal.takeProfit : "—"}</p>
+              {/* SAFE FIELDS */}
+              <p><b>Entry:</b> {signal.entry !== undefined ? String(signal.entry) : "—"}</p>
+              <p><b>SL:</b> {signal.stopLoss !== undefined ? String(signal.stopLoss) : "—"}</p>
+              <p><b>TP:</b> {signal.takeProfit !== undefined ? String(signal.takeProfit) : "—"}</p>
 
-              {signal.confidence !== undefined && <p><b>Confidence:</b> {signal.confidence}</p>}
-              {signal.rsi !== undefined && <p><b>RSI:</b> {signal.rsi}</p>}
+              {signal.confidence !== undefined && <p><b>Confidence:</b> {String(signal.confidence)}</p>}
+              {signal.rsi !== undefined && <p><b>RSI:</b> {String(signal.rsi)}</p>}
               {signal.ts && <p style={{ fontSize: 11, opacity: 0.7 }}>{new Date(signal.ts).toLocaleString()}</p>}
             </div>
           ) : (
@@ -207,4 +239,4 @@ export default function App() {
       </div>
     </div>
   );
-  }
+}
