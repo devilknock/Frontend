@@ -117,7 +117,7 @@ export default function App() {
           (pd && typeof pd === "object" && pd.pattern) ??
           (typeof pd === "string" ? pd : "Unknown");
 
-        setPattern(String(value || "Unknown"));
+        setPattern(value || {});
         return;
       }
 
@@ -234,7 +234,9 @@ export default function App() {
       {/* PATTERN */}
       <div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
         <h3>Latest Pattern</h3>
-        {pattern || "No pattern yet"}
+        <pre style={{ fontSize: 11 }}>
+  {pattern ? JSON.stringify(pattern, null, 2) : "No pattern yet"}
+</pre>
       </div>
     </div>
   );
