@@ -112,13 +112,21 @@ export default function App() {
 
       // ---------- PATTERN ----------
       if (parsed?.type === "pattern") {
-        const pd = parsed.data;
-        const value =
-          (pd && typeof pd === "object" && pd.pattern) ??
-          (typeof pd === "string" ? pd : "Unknown");
+  const pd = parsed.data;
 
-        setPattern(String(value || "Unknown"));
-        return;
+  if (typeof pd === "string") {
+    setPattern(pd);
+  } else if (pd && typeof pd === "object") {
+    setPattern({
+      pattern: pd.pattern ?? "Unknown",
+      strength: pd.strength ?? null,
+      extra: pd
+    });
+  } else {
+    setPattern("Unknown");
+  }
+
+  return;
       }
 
       // ---------- SIGNAL ----------
