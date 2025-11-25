@@ -38,7 +38,7 @@ function extractTs(obj) {
 }
 
 export default function App() {
-  const [status, setStatus] = useState("connecting...");
+  const [status, setStatus] = useState("Connecting...");
   const [signal, setSignal] = useState(null);
   const [prices, setPrices] = useState([]);
   const [pattern, setPattern] = useState("No Pattern Yet");
@@ -46,17 +46,13 @@ export default function App() {
   useEffect(() => {
     const ws = new WebSocket("wss://aka-g2l0.onrender.com");
 
-    ws.onopen = () => setStatus("Connected ✔");
-    ws.onerror = () => setStatus("Error ❌");
-    ws.onclose = () => setStatus("Disconnected ⚠");
+    ws.onopen = () => setStatus("🟢 Connected");
+    ws.onerror = () => setStatus("🔴 Error Connecting");
+    ws.onclose = () => setStatus("⚠ Disconnected");
 
     ws.onmessage = (ev) => {
       let data;
-      try {
-        data = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
+      try { data = JSON.parse(ev.data); } catch { return; }
 
       if (data.type === "pattern" && data.data?.pattern) {
         setPattern(data.data.pattern);
@@ -65,15 +61,15 @@ export default function App() {
 
       if (data.type === "signal" || data.signal) {
         const raw = data.data || data.signal || data;
-        const s = { ...raw };
-        s.ts = extractTs(raw);
+        const s = { ...raw, ts: extractTs(raw) };
         setSignal(s);
         return;
       }
 
       const close = extractClose(data);
       const ts = extractTs(data);
-      if (close) {
+
+      if (close !== undefined) {
         setPrices((prev) => {
           const next = [...prev, { t: ts || Date.now(), close }];
           if (next.length > 200) next.shift();
@@ -86,59 +82,92 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ background: "#0b1220", color: "#e6eef8", minHeight: "100vh", padding: 20, fontFamily: "Poppins, sans-serif" }}>
+    <div style={{
+      background: "#0b1220",
+      color: "#e6eef8",
+      minHeight: "100vh",
+      padding: 20,
+      fontFamily: "Poppins, sans-serif"
+    }}>
       
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>📈 Trading Signal Indicator</h1>
-        <p style={{ opacity: 0.7, margin: 0, fontSize: 12 }}>Created by: <b>Ansh & Nitin</b></p>
+        <p style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>
+          Made by <b>Ansh & Nitin</b>
+        </p>
       </div>
 
-      <p style={{ opacity: 0.7 }}>{status}</p>
+      <p style={{ opacity: 0.7, marginTop: 6 }}>{status}</p>
 
-      <div style={{ marginTop: 15, display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+      {/* Responsive Section */}
+      <div style={{
+        marginTop: 15,
+        display: "grid",
+        gridTemplateColumns: "1fr",
+        gap: 16
+      }}>
 
-        {/* Price Section */}
+        {/* Price Feed */}
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
-          <h3>📊 Recent Price</h3>
-          <div style={{ height: 230, overflow: "auto", padding: 6 }}>
-            {prices.slice().reverse().map((p, i) => (
-              <div key={i} style={{ fontSize: 12, padding: "2px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                {new Date(p.t).toLocaleTimeString()} — {p.close.toFixed(2)}
-              </div>
-            ))}
+          <h3>📊 Live Price Feed</h3>
+          <div style={{
+            height: 230,
+            overflowY: "auto",
+            borderRadius: 6,
+            padding: 5
+          }}>
+            {prices.length ? (
+              prices.slice().reverse().map((p, i) => (
+                <div key={i} style={{
+                  fontSize: 12,
+                  padding: "4px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.05)"
+                }}>
+                  {new Date(p.t).toLocaleTimeString()} — <b>{p.close.toFixed(2)}</b>
+                </div>
+              ))
+            ) : (
+              <p style={{ opacity: 0.6 }}>⏳ Waiting for live price...</p>
+            )}
           </div>
         </div>
 
-        {/* Signal Section */}
+        {/* Signal Box */}
         <div style={{ background: "#071024", padding: 12, borderRadius: 8 }}>
-          <h3>🚀 Latest Signal</h3>
+          <h3>🚀 Latest Trading Signal</h3>
           {signal ? (
             <div style={{ lineHeight: "22px" }}>
               <p><b>Symbol:</b> {signal.symbol || "BTCUSDT"}</p>
               <p>
                 <b>Signal:</b>{" "}
                 <span style={{
-                  color: signal.signal === "BUY" ? "#19e063"
-                        : signal.signal === "SELL" ? "#ff4d4d"
-                        : "#ffd700"
+                  color: signal.signal === "BUY" ? "#27ef75" :
+                         signal.signal === "SELL" ? "#ff4d4d" : "#ffd54c"
                 }}>
-                  {signal.signal || "—"}
+                  {signal.signal}
                 </span>
               </p>
 
-              <p><b>Pattern:</b> {pattern}</p>
+              <p><b>Pattern Detected:</b> {pattern}</p>
 
-              {signal.stopLoss && <p><b>SL:</b> {signal.stopLoss}</p>}
-              {signal.takeProfit && <p><b>TP:</b> {signal.takeProfit}</p>}
-              {signal.rsi !== undefined && <p><b>RSI:</b> {signal.rsi}</p>}
-              {signal.ts && <p style={{ fontSize: 11, opacity: 0.6 }}>{new Date(signal.ts).toLocaleString()}</p>}
+              {signal.stopLoss && <p><b>Stop Loss:</b> {signal.stopLoss}</p>}
+              {signal.takeProfit && <p><b>Take Profit:</b> {signal.takeProfit}</p>}
+              {signal.rsi && <p><b>RSI:</b> {signal.rsi}</p>}
+
+              <p style={{ opacity: 0.6, fontSize: 11 }}>
+                ⏱ {new Date(signal.ts).toLocaleString()}
+              </p>
             </div>
           ) : (
-            <p>No signal yet</p>
+            <p>No signal yet...</p>
           )}
         </div>
       </div>
     </div>
   );
-}
+                                           }
