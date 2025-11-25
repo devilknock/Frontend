@@ -127,10 +127,21 @@ export default function App() {
       
       // PATTERN DETECTION
      if (parsed.type === "pattern") {
-      console.log("Pattern found:", parsed.data.pattern);
-      setPattern(parsed.data.pattern);
-      return;
-    }
+  console.log("Pattern found:", parsed.data);
+
+  // Safe extraction
+  const p = parsed.data || {};
+
+  setPattern({
+    name: p.pattern || "UNKNOWN",
+    entry: p.entry || null,
+    stopLoss: p.stopLoss || null,
+    takeProfit: p.takeProfit || null,
+    profitRange: p.profitRange || null
+  });
+
+  return;
+}
       
       // Signal type (explicit) -> normalize ts & set
       if (parsed.type === "signal" || parsed.signal) {
@@ -267,10 +278,21 @@ export default function App() {
       </div> 
             <div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
   <h3>Latest Pattern</h3>
-  {pattern ? (
+
+  {!pattern || pattern === "None" ? (
+    <div>No pattern yet</div>
+  ) : typeof pattern === "string" ? (
     <div>{pattern}</div>
   ) : (
-    "No pattern yet"
+    <div style={{ fontSize: 14 }}>
+      <p><b>Pattern:</b> {pattern.name}</p>
+      {pattern.entry && <p><b>Entry:</b> {pattern.entry}</p>}
+      {pattern.stopLoss && <p><b>Stop Loss:</b> {pattern.stopLoss}</p>}
+      {pattern.takeProfit && <p><b>Take Profit:</b> {pattern.takeProfit}</p>}
+      {pattern.profitRange && (
+        <p><b>Profit Range:</b> {pattern.profitRange.min} → {pattern.profitRange.max}</p>
+      )}
+    </div>
   )}
 </div>
     </div>
