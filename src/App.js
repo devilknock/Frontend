@@ -69,12 +69,12 @@ export default function App() {
       const close = extractClose(data);
       const ts = extractTs(data);
 
-      if (close !== undefined) {
-        setPrices((prev) => {
-          const next = [...prev, { t: ts || Date.now(), close }];
-          if (next.length > 200) next.shift();
-          return next;
-        });
+      if (close !== undefined && close !== null) {
+  setPrices((prev) => {
+    const next = [...prev, { t: ts || Date.now(), close }];
+    if (next.length > 200) next.shift();
+    return next;
+  });
       }
     };
 
@@ -97,8 +97,7 @@ export default function App() {
         alignItems: "center"
       }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>📈 Trading Signal Indicator</h1>
-        <p style={{ fontSize: 12, opacity: 0.7, margin: 0 }}>
-          Made by <b>Ansh & Nitin</b>
+        <p style={{ fontSize: 12, opacity: 0.7, margin: 0 }}> Made by <b>Ansh & Nitin</b>
         </p>
       </div>
 
@@ -170,4 +169,4 @@ export default function App() {
       </div>
     </div>
   );
-        }
+      }
