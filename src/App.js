@@ -243,12 +243,14 @@ export default function App() {
       </div>
 
       {/* PATTERN */}
-      <div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
-        <h3>Latest Pattern</h3>
-        <pre style={{ fontSize: 11 }}>
-  {pattern ? JSON.stringify(pattern, null, 2) : "No pattern yet"}
-</pre>
-      </div>
+<div style={{ background: "#071024", padding: 12, borderRadius: 8, marginTop: 12 }}>
+  <h3>Latest Pattern</h3>
+
+  <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", color: "#b3b3b3" }}>
+    {pattern ? JSON.stringify(pattern, null, 2) : "No pattern yet"}
+  </pre>
+
+</div>
     </div>
   );
   }
