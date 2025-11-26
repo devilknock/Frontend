@@ -43,10 +43,7 @@ export default function App() {
   const [pattern, setPattern] = useState("No Pattern Yet");
 
   useEffect(() => {
-    // Backend WebSocket - Only signals + patterns
     const ws1 = new WebSocket("wss://aka-g2l0.onrender.com");
-
-    // Binance WebSocket - Live price stream
     const ws2 = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@ticker");
 
     ws1.onopen = () => setStatus("🟢 Connected");
@@ -57,13 +54,11 @@ export default function App() {
       let data;
       try { data = JSON.parse(ev.data); } catch { return; }
 
-      // Pattern
       if (data.type === "pattern" && data?.data?.pattern) {
         setPattern(data.data.pattern);
         return;
       }
 
-      // Signal
       if (data.type === "signal" || data.signal) {
         const raw = data.data || data.signal || data;
         const s = { ...raw, ts: extractTs(raw) };
@@ -72,7 +67,6 @@ export default function App() {
       }
     };
 
-    // Binance live price feed
     ws2.onmessage = (ev) => {
       let d = JSON.parse(ev.data);
       const close = extractClose(d);
@@ -93,95 +87,110 @@ export default function App() {
     };
   }, []);
 
+  // Dynamic Signal Color
+  const getSignalColor = (sg) => {
+    if (!sg) return "#ffe258";
+    if (sg === "BUY") return "#28ff84";
+    if (sg === "SELL") return "#ff4d4d";
+    return "#4da6ff"; // HOLD
+  };
+
   return (
     <div style={{
       background: "#0b1220",
       color: "white",
       minHeight: "100vh",
-      padding: 18,
+      padding: 20,
       fontFamily: "Poppins"
     }}>
-      
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2>📈 Trading Signal Indicator</h2>
-        <p style={{ opacity: 0.8 }}>Made by <b>Ansh & Nitin</b></p>
+
+      {/* ======= 3D Heading ======= */}
+      <div style={{ textAlign: "center", position: "relative", marginBottom: 40 }}>
+        <h1 style={{
+          fontSize: 40,
+          fontWeight: "bold",
+          textShadow: "3px 3px 10px rgba(0,0,0,0.8), -3px -3px 10px rgba(255,255,255,0.1)"
+        }}>
+          TRADING SIGNAL INDICATOR
+        </h1>
+
+        {/* Made By */}
+        <p style={{
+          position: "absolute",
+          top: 10,
+          right: 20,
+          fontSize: 13,
+          color: "#5bd1ff",
+          fontWeight: "bold"
+        }}>
+          Made by Ansh & Nitin
+        </p>
       </div>
 
-      <p style={{ opacity: 0.6 }}>{status}</p>
+      {/* Connection status */}
+      <p style={{ opacity: 0.6, textAlign: "center" }}>{status}</p>
 
-      {/* Layout */}
+      {/* ======= Blank Chart Area ======= */}
       <div style={{
-        marginTop: 15,
-        display: "grid",
-        gridTemplateColumns: "1fr",
-        gap: 16
+        height: 250,
+        margin: "25px 0",
+        borderRadius: 12,
+        background: "#071024",
+        boxShadow: "0 3px 10px rgba(0,0,0,0.4)"
+      }}>
+        {/* Chart will come here */}
+      </div>
+
+      {/* ======= Latest Signal + Price Box ======= */}
+      <div style={{
+        background: "#071024",
+        padding: 20,
+        borderRadius: 12,
+        boxShadow: "0 3px 10px rgba(0,0,0,0.4)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
       }}>
         
-        {/* Live Price Box */}
-        <div style={{
-          background: "#071024",
-          padding: 15,
-          borderRadius: 10
-        }}>
-          <h3>📊 Live Price Feed</h3>
+        {/* LEFT SIDE - Signal with box */}
+        {signal ? (
+          <div>
+            <div style={{
+              display: "inline-block",
+              padding: "7px 18px",
+              borderRadius: 8,
+              background: getSignalColor(signal.signal),
+              color: "#000",
+              fontWeight: "bold",
+              marginBottom: 8
+            }}>
+              {signal.signal}
+            </div>
 
-          <div style={{
-            height: 250,
-            overflowY: "auto",
-            paddingRight: 5
-          }}>
-            {prices.length ? prices.slice().reverse().map((p, i) => (
-              <div key={i} style={{
-                fontSize: 13,
-                padding: "5px 0",
-                borderBottom: "1px solid rgba(255,255,255,0.08)"
-              }}>
-                {new Date(p.t).toLocaleTimeString()} — <b>{p.close.toFixed(2)}</b>
-              </div>
-            )) : (
-              <p style={{ opacity: 0.6 }}>⏳ Waiting for live price...</p>
-            )}
+            <p>Pattern: {pattern}</p>
+            {signal.stopLoss && <p>SL: {signal.stopLoss}</p>}
+            {signal.takeProfit && <p>TP: {signal.takeProfit}</p>}
+            {signal.rsi && <p>RSI: {signal.rsi}</p>}
+
+            <p style={{ opacity: 0.5, fontSize: 11 }}>
+              ⏱ {new Date(signal.ts).toLocaleString()}
+            </p>
           </div>
-        </div>
+        ) : (
+          <p style={{ opacity: 0.5 }}>No signal detected yet...</p>
+        )}
 
-        {/* Signal Box */}
+        {/* RIGHT SIDE - Live Price */}
         <div style={{
-          background: "#071024",
-          padding: 15,
-          borderRadius: 10
+          textAlign: "right",
+          fontWeight: "bold",
+          fontSize: 22
         }}>
-          <h3>🚀 Latest Trading Signal</h3>
-
-          {signal ? (
-            <>
-              <p><b>Symbol:</b> {signal.symbol || "BTCUSDT"}</p>
-              <p>
-                <b>Signal:</b>{" "}
-                <span style={{
-                  color:
-                    signal.signal === "BUY" ? "#28ff84" :
-                    signal.signal === "SELL" ? "#ff4d4d" :
-                    "#ffe258"
-                }}>
-                  {signal.signal}
-                </span>
-              </p>
-
-              <p><b>Pattern:</b> {pattern}</p>
-              {signal.stopLoss && <p><b>Stop Loss:</b> {signal.stopLoss}</p>}
-              {signal.takeProfit && <p><b>Take Profit:</b> {signal.takeProfit}</p>}
-              {signal.rsi && <p><b>RSI:</b> {signal.rsi}</p>}
-
-              <p style={{ opacity: 0.5, fontSize: 11 }}>
-                ⏱ {new Date(signal.ts).toLocaleString()}
-              </p>
-            </>
-          ) : (
-            <p style={{ opacity: 0.5 }}>No signal detected yet...</p>
-          )}
+          {prices.length ? prices[prices.length - 1].close.toFixed(2) : "----"}
         </div>
+
       </div>
+
     </div>
   );
-        }
+}
