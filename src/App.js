@@ -105,7 +105,7 @@ export default function App() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <h2>📈 Trading Signal Indicator</h2>
-        <p style={{ opacity: 0.6 }}>Made by <b>Ansh & Nitin</b></p>
+        <p style={{ opacity: 0.8 }}>Made by <b>Ansh & Nitin</b></p>
       </div>
 
       <p style={{ opacity: 0.6 }}>{status}</p>
