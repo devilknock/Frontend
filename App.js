@@ -100,7 +100,9 @@ export default function App() {
               {signal.takeProfit && <p><b>TP:</b> {signal.takeProfit}</p>}
               {signal.confidence && <p><b>Confidence:</b> {signal.confidence}</p>}
               {signal.rsi !== undefined && <p><b>RSI:</b> {signal.rsi}</p>}
-              {signal.ts && <p style={{ fontSize: 12, opacity: 0.8 }}>{new Date(signal.ts).toLocaleString()}</p>}
+              {signal.ts && <p style={{ fontSize: 12, opacity: 0.8 }}>⏱ {signal.ts && !isNaN(Number(signal.ts)) 
+    ? new Date(Number(signal.ts)).toLocaleString() 
+    : "Waiting for signal..."}</p>}
             </div>
           ) : (
             <p>No signal yet</p>
